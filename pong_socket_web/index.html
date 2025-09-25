@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <title>Socket Pong - Viewer</title>
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>
+    <style>
+        body {
+            font-family: sans-serif;
+            padding: 20px;
+        }
+
+        #gameCanvas {
+            background: #222;
+            display: block;
+            margin-top: 20px;
+        }
+
+        #score {
+            font-size: 1.2em;
+            margin-top: 10px;
+            color: #333;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>🎮 Socket Pong Viewer</h1>
+
+    <label for="gameId">Game ID:</label>
+    <input type="text" id="gameId" value="a0f05c8e-a90f-41a2-8e60-63d692e0f6fb" />
+    <input type="text" id="playerName" value="test-player" />
+    <button onclick="connect()">Conectar</button>
+
+    <h3>Marcador:</h3>
+    <div id="score">-</div>
+
+    <canvas id="gameCanvas" width="800" height="400"></canvas>
+    <p id="object"></p>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreDiv = document.getElementById('score');
+        const objectP = document.getElementById('object');
+
+        let stompClient = null;
+        let currentGameId = '';
+        let paddle1Y = 160; // posición inicial de la pala izquierda
+        let paddle2Y = 160; // posición inicial de la pala derecha
+        let controlledPaddleY = 160; // 1 para izquierda, 2 para derecha
+        let playerName = "test-player"; // Identificador del jugador (puede ser dinámico)
+        const step = 2;
+
+        const keysPressed = {
+            up: false,
+            down: false
+        };
+
+
+        const PADDLE_WIDTH = 10;
+        const PADDLE_HEIGHT = 80;
+        const BALL_RADIUS = 10;
+
+        function drawGame(game) {
+            // Actualiza la posición local para mantenerla sincronizada
+            if (game.player1 === playerName) {
+                controlledPaddleY = game.positions.paddle1Y;
+            } else if (game.player2 === playerName) {
+                controlledPaddleY = game.positions.paddle2Y;
+            }
+
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            ctx.fillStyle = '#222';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Pelota
+            ctx.fillStyle = 'white';
+            ctx.beginPath();
+            ctx.arc(game.positions.ball.x, game.positions.ball.y, BALL_RADIUS, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Palas
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, game.positions.paddle1Y, PADDLE_WIDTH, PADDLE_HEIGHT); // izquierda
+            ctx.fillRect(canvas.width - PADDLE_WIDTH, game.positions.paddle2Y, PADDLE_WIDTH, PADDLE_HEIGHT); // derecha
+
+            // Score
+            scoreDiv.textContent = `Jugador 1 (${game.player1}): ${game.score1}  —  Jugador 2 (${game.player2}): ${game.score2}`;
+        }
+
+        function connect() {
+            currentGameId = document.getElementById('gameId').value;
+            const socket = new SockJS('http://localhost:8080/ws');
+            stompClient = Stomp.over(socket);
+            stompClient.debug = null;
+            playerName = document.getElementById('playerName').value;
+
+
+
+            stompClient.connect({}, function (frame) {
+                console.log('Conectado: ' + frame);
+                stompClient.subscribe('/topic/gameState/' + currentGameId, function (message) {
+                    const game = JSON.parse(message.body);
+                    drawGame(game);
+                    objectP.textContent = message.body;
+
+                });
+            });
+        }
+
+        function sendPaddlePosition() {
+            if (stompClient && stompClient.connected) {
+                stompClient.send("/app/movePaddle", {}, JSON.stringify({
+                    gameId: currentGameId,
+                    paddleY: controlledPaddleY,
+                    playerName: playerName
+                }));
+            }
+        }
+
+        // Detectar teclas presionadas
+        document.addEventListener("keydown", function (e) {
+            if (e.key === "ArrowUp") {
+                keysPressed.up = true;
+            } else if (e.key === "ArrowDown") {
+                keysPressed.down = true;
+            }
+        });
+
+        document.addEventListener("keyup", function (e) {
+            if (e.key === "ArrowUp") {
+                keysPressed.up = false;
+            } else if (e.key === "ArrowDown") {
+                keysPressed.down = false;
+            }
+        });
+
+        // Loop de movimiento
+        setInterval(() => {
+            let moved = false;
+            if (keysPressed.up) {
+                controlledPaddleY = Math.max(controlledPaddleY - step, 0);
+                moved = true;
+            }
+            if (keysPressed.down) {
+                controlledPaddleY = Math.min(controlledPaddleY + step, canvas.height - PADDLE_HEIGHT);
+                moved = true;
+            }
+            if (moved) {
+                sendPaddlePosition();
+            }
+        }, 10); // cada 10 ms (~100 fps)
+    </script>
+
+</body>
+
+</html>
